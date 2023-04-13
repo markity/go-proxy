@@ -15,8 +15,9 @@ func main() {
 
 	fmt.Println("created tun:", tun.Name())
 
-	// ifconfig tun0 10.8.0.2/16 mtu 1400 up
-	// route add 123.123.123.123 tun0
+	// ip link set tun1 up
+	// route add 0.0.0.0/1 tun1
+	// route add 128.0.0.0.1/1 tun1
 
 	b := make([]byte, 1500, 1500)
 	for {
@@ -24,6 +25,8 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		fmt.Println("----------")
 		fmt.Println(b[:n])
+		fmt.Println("----------")
 	}
 }
