@@ -52,7 +52,9 @@ func main() {
 	}
 	defer tun.Close()
 
-	MustIfconfigCmd(tun.Name(), "10.8.0.1/16", "mtu", "1300", "up")
+	MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
+	MustIPCmd("addr", "add", "10.8.0.1", "dev", tun.Name())
+	MustIPCmd("route", "add", "10.8.0.0/16", "via", "10.8.0.2")
 
 	// conn reader
 	go func() {
