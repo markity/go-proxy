@@ -1,29 +1,28 @@
 package main
 
 import (
+	"errors"
+	"go-proxy/comm"
 	"log"
 	"net"
-	"sync"
-	"time"
 
 	"github.com/pion/dtls"
 	"github.com/songgao/water"
 )
 
-var Logined = false
-var Mutex sync.Mutex
-var ConnetTimeout = time.Second * 3
-
 func main() {
 	config := &dtls.Config{
 		PSK: func(hint []byte) ([]byte, error) {
-			log.Printf("Client's hint: %s \n", string(hint))
-			return []byte("mark2004119"), nil
+			hintStr := string(hint)
+			pwd, ok := UserMap[hintStr]
+			if !ok {
+				return nil, errors.New("unregistered username")
+			}
+			return []byte(pwd), nil
 		},
-		PSKIdentityHint: []byte("markity"),
-		CipherSuites:    []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
-		MTU:             1400,
-		ConnectTimeout:  &ConnetTimeout,
+		CipherSuites:   []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
+		MTU:            1400,
+		ConnectTimeout: &ConnetTimeout,
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:8000")
@@ -38,45 +37,67 @@ func main() {
 		log.Fatalf("failed to Listen: %v\n", err)
 	}
 
-	// accept
-	c, err := ln.Accept()
-	if err != nil {
-		log.Fatalf("Accept error: %v\n", err)
-	}
+	ipv4Poll := NewAddrPool("10.8.0.0/16")
 
-	// 对udp不考虑write超时的情况
-
-	tun, err := water.New(water.Config{DeviceType: water.TUN})
-	if err != nil {
-		log.Fatalf("failed to create tun: %v\n", err)
-	}
-	defer tun.Close()
-
-	MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
-	MustIPCmd("addr", "add", "10.8.0.1", "dev", tun.Name())
-	MustIPCmd("route", "add", "10.8.0.0/16", "via", "10.8.0.2")
-
-	// conn reader
-	go func() {
-		buf := make([]byte, 1400, 1400)
-		n, err := c.Read(buf)
+	for {
+		// accept
+		c, err := ln.Accept()
 		if err != nil {
-			return
+			log.Fatalf("Accept error: %v\n", err)
 		}
-		tun.Write(buf[:n])
-	}()
+		go func() {
+			forClient := ipv4Poll.Next()
+			forServer := ipv4Poll.Next()
+			defer func() {
+				ipv4Poll.Release(forClient)
+				ipv4Poll.Release(forServer)
+				c.Close()
+			}()
 
-	// tun reader
-	go func() {
-		for {
-			buf := make([]byte, 1400, 1400)
-			n, err := tun.Read(buf)
+			tun, err := water.New(water.Config{DeviceType: water.TUN})
 			if err != nil {
-				return
+				log.Fatalf("failed to create tun: %v\n", err)
 			}
-			c.Write(buf[:n])
-		}
-	}()
+			defer tun.Close()
 
-	select {}
+			MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
+			MustIPCmd("addr", "add", forServer.String(), "dev", tun.Name())
+			MustIPCmd("route", "add", forClient.String()+"/32", "via", forServer.String())
+
+			// 发送ip dispatch包, 然后开始转发数据包
+			c.Write(comm.NewIPDispatchPacket(forClient, forServer).Pack())
+
+			go func() {
+				for {
+					buf := make([]byte, 1400, 1400)
+					n, err := c.Read(buf)
+					if err != nil {
+						panic(err)
+					}
+					println("write tun")
+					_, err = tun.Write(buf[:n])
+					if err != nil {
+						panic(err)
+					}
+				}
+			}()
+
+			// tun reader
+			go func() {
+				for {
+					buf := make([]byte, 1400, 1400)
+					n, err := tun.Read(buf)
+					if err != nil {
+						panic(err)
+					}
+					println("write conn")
+					_, err = c.Write(buf[:n])
+					if err != nil {
+						panic(err)
+					}
+				}
+			}()
+		}()
+
+	}
 }

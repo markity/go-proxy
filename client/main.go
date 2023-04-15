@@ -1,26 +1,22 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"go-proxy/comm"
 	"log"
 	"net"
-	"time"
 
 	"github.com/pion/dtls"
 	"github.com/songgao/water"
 )
 
-var ServerIP = "162.14.208.15"
-var ServerPort = 8000
-var ConnetTimeout = time.Second * 3
-
 func main() {
 	config := &dtls.Config{
 		PSK: func(hint []byte) ([]byte, error) {
-			log.Printf("Server's hint: %s \n", string(hint))
-			return []byte("mark2004119"), nil
+			return []byte(Password), nil
 		},
-		PSKIdentityHint: []byte("markity"),
+		PSKIdentityHint: []byte(Username),
 		CipherSuites:    []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
 		MTU:             1400,
 		ConnectTimeout:  &ConnetTimeout,
@@ -38,15 +34,29 @@ func main() {
 	}
 	defer c.Close()
 
+	// 读取ip dispatch包
+	packetBytes := make([]byte, 1400, 1400)
+	n, err := c.Read(packetBytes)
+	if err != nil {
+		log.Fatalf("failed to read: %v\n", err)
+	}
+
+	if comm.ParsePacket(packetBytes[:n]) != comm.IPDispatchPacketType {
+		log.Fatalf("protocol error\n")
+	}
+
+	var ips comm.IPDispatchPacket
+	json.Unmarshal(packetBytes[:n], &ips)
+
 	// 开tun
 	tun, err := water.New(water.Config{DeviceType: water.TUN})
 	if err != nil {
 		log.Fatalf("failed to create tun device: %v\n", err)
 	}
-	// ifconfig tun0 10.8.0.2/16 mtu %d up
-	MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
-	MustIPCmd("addr", "add", "10.8.0.1", "dev", tun.Name())
-	MustIPCmd("route", "add", "10.8.0.0/16", "via", "10.8.0.1")
+	defer tun.Close()
+
+	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
+	comm.MustIPCmd("addr", "add", ips.ForClient, "dev", tun.Name())
 
 	fmt.Println("creating route table...")
 	// 通过脚本执行
@@ -54,7 +64,7 @@ func main() {
 ip route add %v via $DEFAULT_GW
 ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v`
-	MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
+	comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
 
 	fmt.Printf("transferring data...\n")
 
@@ -64,20 +74,31 @@ ip route add 128.0.0.0/1 dev %v`
 			buf := make([]byte, 1300, 1300)
 			n, err := tun.Read(buf)
 			if err != nil {
-				return
+				panic(err)
 			}
-			c.Write(buf[:n])
+			println("write conn")
+			_, err = c.Write(buf[:n])
+			if err != nil {
+				panic(err)
+			}
 		}
 	}()
 
 	// connection reader
 	go func() {
-		buf := make([]byte, 1400, 1400)
-		n, err := c.Read(buf)
-		if err != nil {
-			return
+		for {
+			buf := make([]byte, 1400, 1400)
+			n, err := c.Read(buf)
+			if err != nil {
+				panic(err)
+			}
+			println("write tun")
+			_, err = tun.Write(buf[:n])
+			if err != nil {
+				panic(err)
+			}
 		}
-		tun.Write(buf[:n])
+
 	}()
 
 	select {}
