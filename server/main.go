@@ -60,9 +60,9 @@ func main() {
 			}
 			defer tun.Close()
 
-			MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
-			MustIPCmd("addr", "add", forServer.String(), "dev", tun.Name())
-			MustIPCmd("route", "add", forClient.String()+"/32", "via", forServer.String())
+			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
+			comm.MustIPCmd("addr", "add", forServer.String(), "dev", tun.Name())
+			comm.MustIPCmd("route", "add", forClient.String()+"/32", "via", forServer.String())
 
 			// 发送ip dispatch包, 然后开始转发数据包
 			c.Write(comm.NewIPDispatchPacket(forClient, forServer).Pack())
