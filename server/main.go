@@ -43,11 +43,12 @@ func main() {
 		// accept
 		c, err := ln.Accept()
 		if err != nil {
-			log.Fatalf("Accept error: %v\n", err)
+			log.Printf("Accept error: %v\n", err)
+			continue
 		}
 		go func() {
-			forClient := ipv4Poll.Next()
 			forServer := ipv4Poll.Next()
+			forClient := ipv4Poll.Next()
 			defer func() {
 				ipv4Poll.Release(forClient)
 				ipv4Poll.Release(forServer)
@@ -97,6 +98,8 @@ func main() {
 					}
 				}
 			}()
+
+			select {}
 		}()
 
 	}

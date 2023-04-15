@@ -9,4 +9,4 @@ var ReadTimeout = time.Second * 3
 var HeartInterval = time.Second * 1
 
 var Username = "markity"
-var Password = "mark2004119"
+var Password = "12345"
