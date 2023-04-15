@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"go-proxy/comm"
 	"log"
 	"net"
+	"time"
 
 	"github.com/pion/dtls"
 	"github.com/songgao/water"
@@ -36,17 +36,18 @@ func main() {
 
 	// 读取ip dispatch包
 	packetBytes := make([]byte, 1400, 1400)
+	c.SetReadDeadline(time.Now().Add(ReadTimeout))
 	n, err := c.Read(packetBytes)
 	if err != nil {
 		log.Fatalf("failed to read: %v\n", err)
 	}
 
-	if comm.ParsePacket(packetBytes[:n]) != comm.IPDispatchPacketType {
+	// 读到的第一个数据包应该是ip dispatch包
+	packet := comm.ParsePacket(packetBytes[:n])
+	ipDispatchPacket, ok := packet.(*comm.IPDispatchPacket)
+	if packet == nil || !ok {
 		log.Fatalf("protocol error\n")
 	}
-
-	var ips comm.IPDispatchPacket
-	json.Unmarshal(packetBytes[:n], &ips)
 
 	// 开tun
 	tun, err := water.New(water.Config{DeviceType: water.TUN})
@@ -56,7 +57,7 @@ func main() {
 	defer tun.Close()
 
 	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
-	comm.MustIPCmd("addr", "add", ips.ForClient, "dev", tun.Name())
+	comm.MustIPCmd("addr", "add", ipDispatchPacket.ForClient, "dev", tun.Name())
 
 	fmt.Println("creating route table...")
 	// 通过脚本执行

@@ -8,10 +8,12 @@ import (
 
 type PacketType int
 
-var IPDispatchPacketType PacketType = 1
-var IPPacketPacketType PacketType = 2
-var HeartPacketType PacketType = 3
-var UnknownPacketType PacketType = 4
+const (
+	IPDispatchPacketType = iota
+	IPPacketPacketType
+	HeartPacketType
+	UnknownPacketType
+)
 
 type Header struct {
 	Type string `json:"type"`
@@ -79,7 +81,7 @@ func NewHeartPacket() *HeartPacket {
 
 // --
 
-func ParsePacket(b []byte) PacketType {
+func ParsePacket(b []byte) interface{} {
 	var header Header
 	if err := json.Unmarshal(b, &header); err != nil {
 		return UnknownPacketType
@@ -87,12 +89,16 @@ func ParsePacket(b []byte) PacketType {
 
 	switch header.Type {
 	case "heart":
-		return HeartPacketType
+		return NewHeartPacket()
 	case "ip_dispatch":
-		return IPDispatchPacketType
+		var p IPDispatchPacket
+		json.Unmarshal(b, &p)
+		return &p
 	case "ip_packet":
-		return IPPacketPacketType
+		var p IPPacketPacket
+		json.Unmarshal(b, &p)
+		return &p
 	default:
-		return UnknownPacketType
+		return nil
 	}
 }
