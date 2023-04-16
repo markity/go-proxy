@@ -1,10 +1,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go-proxy/comm"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"github.com/pion/dtls"
@@ -13,11 +15,19 @@ import (
 )
 
 func main() {
+	u := flag.String("u", "", "username")
+	p := flag.String("p", "", "password")
+	flag.Parse()
+	if *u == "" || *p == "" {
+		fmt.Printf("usage: %v -u <username> -p <password>\n", os.Args[0])
+		return
+	}
+
 	config := &dtls.Config{
 		PSK: func(hint []byte) ([]byte, error) {
-			return []byte(Password), nil
+			return []byte(*p), nil
 		},
-		PSKIdentityHint: []byte(Username),
+		PSKIdentityHint: []byte(*u),
 		CipherSuites:    []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
 		MTU:             1500,
 		ConnectTimeout:  &ConnetTimeout,
@@ -109,7 +119,6 @@ ip route add 128.0.0.0/1 dev %v`
 			c.SetReadDeadline(time.Now().Add(ReadTimeout))
 			n, err := c.Read(buf)
 			if err != nil {
-				println("error happened www")
 				errorChan <- err
 				<-connectionReadExitChan
 				return
@@ -126,29 +135,22 @@ ip route add 128.0.0.0/1 dev %v`
 	}()
 
 	for {
-		println("select")
 		select {
 		case <-timeTickChan:
-			fmt.Println("tick")
 			_, err := c.Write(comm.HeartMagicPacket)
 			if err != nil {
 				log.Fatalf("failed to write to connection: %v\n", err)
 			}
 		case err := <-errorChan:
-			fmt.Println("error")
 			log.Fatalf("error happened: %v\n", err)
 		case ipPacketContent := <-tunReadChan:
-			fmt.Println("ip packet")
 			_, err := c.Write(ipPacketContent)
-			fmt.Println(ipPacketContent)
 			if err != nil {
 				log.Fatalf("failed to write to connection: %v\n", err)
 			}
 		case msg := <-connectionReadChan:
 			if string(msg) == string(comm.HeartMagicPacket) {
-				println("heart packet")
 			} else {
-				fmt.Println("ip packet")
 				_, err := tun.Write(msg)
 				if err != nil {
 					log.Fatalf("failed to write to tun: %v\n", err)

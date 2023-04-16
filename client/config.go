@@ -15,7 +15,3 @@ var ReadTimeout = time.Second * 3
 // 客户端发送心跳包的频率, 服务端读到心跳包后也会发送心跳包
 // 因此心跳包的间隔应该较小
 var HeartInterval = time.Second * 1
-
-// 权限信息, 一个用户同一时刻只能在一个设备上登陆, 且后登陆的会挤掉之前的登陆
-var Username = "markity"
-var Password = "12345"

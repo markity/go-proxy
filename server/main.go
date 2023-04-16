@@ -136,7 +136,7 @@ func main() {
 					}
 				case msg := <-connectionReadChan:
 					if string(msg) == string(comm.HeartMagicPacket) {
-						_, err := tun.Write(msg)
+						_, err := c.Write(msg)
 						if err != nil {
 							log.Printf("failed to write to tun: %v\n", err)
 							tunReadExitChan <- struct{}{}
