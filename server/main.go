@@ -71,7 +71,7 @@ func main() {
 			comm.MustIPCmd("route", "add", forClient.String()+"/32", "via", forServer.String())
 
 			// 发送ip dispatch包, 然后开始转发数据包
-			c.Write(comm.NewIPDispatchPacket(forClient, forServer).Pack())
+			c.Write([]byte(forClient.String()))
 
 			errorChan := make(chan error)
 			tunReadChan := make(chan []byte)
@@ -86,7 +86,6 @@ func main() {
 					c.SetReadDeadline(time.Now().Add(ReadTimeout))
 					n, err := c.Read(buf)
 					if err != nil {
-						fmt.Println("errorWWW")
 						errorChan <- err
 						<-connectionReadExitChan
 						return
@@ -106,9 +105,7 @@ func main() {
 				buf := make([]byte, 1500, 1500)
 				for {
 					n, err := tun.Read(buf)
-					fmt.Println("tun read")
 					if err != nil {
-						errorChan <- err
 						<-tunReadChan
 						return
 					}
@@ -131,7 +128,6 @@ func main() {
 					return
 				case ipPacketBytes := <-tunReadChan:
 					_, err := c.Write(ipPacketBytes)
-					fmt.Println("Fs")
 					if err != nil {
 						log.Printf("error happened, closing the tun and connection: %v\n", err)
 						tunReadExitChan <- struct{}{}
@@ -139,8 +135,8 @@ func main() {
 						return
 					}
 				case msg := <-connectionReadChan:
-					if string(msg) == string(comm.MagicHeart) {
-						_, err := tun.Write(comm.MagicHeart)
+					if string(msg) == string(comm.HeartMagicPacket) {
+						_, err := tun.Write(msg)
 						if err != nil {
 							log.Printf("failed to write to tun: %v\n", err)
 							tunReadExitChan <- struct{}{}

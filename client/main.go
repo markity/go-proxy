@@ -9,6 +9,7 @@ import (
 
 	"github.com/pion/dtls"
 	"github.com/songgao/water"
+	"inet.af/netaddr"
 )
 
 func main() {
@@ -45,14 +46,13 @@ func main() {
 	}
 
 	// 读到的第一个数据包应该是ip dispatch包
-	packet := comm.ParsePacket(packetBytes[:n])
-	ipDispatchPacket, ok := packet.(*comm.IPDispatchPacket)
-	if packet == nil || !ok {
-		log.Fatalf("protocol error\n")
-		return
+	ipString := string(packetBytes[:n])
+	ipForClient, err := netaddr.ParseIP(ipString)
+	if err != nil || !ipForClient.Is4() {
+		log.Fatalf("protocol error: unexpected ip dispatch packet read")
 	}
 
-	fmt.Printf("succeed to fetch ip: %v\n", ipDispatchPacket.ForClient)
+	fmt.Printf("succeed to fetch ip: %v\n", ipForClient)
 
 	// 开tun
 	tun, err := water.New(water.Config{DeviceType: water.TUN})
@@ -63,7 +63,7 @@ func main() {
 	defer tun.Close()
 
 	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
-	comm.MustIPCmd("addr", "add", ipDispatchPacket.ForClient, "dev", tun.Name())
+	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
 	fmt.Println("creating route table...")
 	// 通过脚本执行
@@ -130,7 +130,7 @@ ip route add 128.0.0.0/1 dev %v`
 		select {
 		case <-timeTickChan:
 			fmt.Println("tick")
-			_, err := c.Write(comm.MagicHeart)
+			_, err := c.Write(comm.HeartMagicPacket)
 			if err != nil {
 				log.Fatalf("failed to write to connection: %v\n", err)
 			}
@@ -145,7 +145,7 @@ ip route add 128.0.0.0/1 dev %v`
 				log.Fatalf("failed to write to connection: %v\n", err)
 			}
 		case msg := <-connectionReadChan:
-			if string(msg) == string(comm.MagicHeart) {
+			if string(msg) == string(comm.HeartMagicPacket) {
 				println("heart packet")
 			} else {
 				fmt.Println("ip packet")
