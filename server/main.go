@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"go-proxy/comm"
 	"log"
 	"net"
@@ -11,8 +12,6 @@ import (
 	"github.com/songgao/water"
 )
 
-var lastHint string
-
 func main() {
 	config := &dtls.Config{
 		PSK: func(hint []byte) ([]byte, error) {
@@ -21,12 +20,11 @@ func main() {
 			if !ok {
 				return nil, errors.New("unregistered username")
 			}
-			lastHint = string(hint)
 			return []byte(pwd), nil
 		},
 		CipherSuites:   []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
 		MTU:            1400,
-		ConnectTimeout: &ConnetTimeout,
+		ConnectTimeout: &ConnectTimeout,
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:8000")
@@ -47,15 +45,11 @@ func main() {
 		// accept
 		c, err := ln.Accept()
 		if err != nil {
-			log.Printf("Accept error: %v\n", err)
+			log.Printf("Accept error, continuing: %v\n", err)
 			continue
 		}
 
-		loginExitChan := make(chan struct{}, 1)
-		if last := LoginSession[lastHint]; last != nil {
-			last <- struct{}{}
-		}
-		LoginSession[lastHint] = loginExitChan
+		fmt.Println("succeed to Accept")
 
 		go func() {
 			forServer := ipv4Poll.Next()
@@ -72,7 +66,7 @@ func main() {
 			}
 			defer tun.Close()
 
-			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1300")
+			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
 			comm.MustIPCmd("addr", "add", forServer.String(), "dev", tun.Name())
 			comm.MustIPCmd("route", "add", forClient.String()+"/32", "via", forServer.String())
 
@@ -82,22 +76,25 @@ func main() {
 			errorChan := make(chan error)
 			tunReadChan := make(chan []byte)
 			tunReadExitChan := make(chan struct{})
-			connectionReadChan := make(chan interface{})
+			connectionReadChan := make(chan []byte)
 			connectionReadExitChan := make(chan struct{})
 
 			// connection reader
 			go func() {
-				buf := make([]byte, 1400, 1400)
+				buf := make([]byte, 1500, 1500)
 				for {
 					c.SetReadDeadline(time.Now().Add(ReadTimeout))
 					n, err := c.Read(buf)
 					if err != nil {
+						fmt.Println("errorWWW")
 						errorChan <- err
 						<-connectionReadExitChan
 						return
 					}
+					copyBuf := make([]byte, n, n)
+					copy(copyBuf, buf)
 					select {
-					case connectionReadChan <- comm.ParsePacket(buf[:n]):
+					case connectionReadChan <- copyBuf:
 					case <-connectionReadExitChan:
 						return
 					}
@@ -106,9 +103,10 @@ func main() {
 
 			// tun reader
 			go func() {
-				buf := make([]byte, 1300, 1300)
+				buf := make([]byte, 1500, 1500)
 				for {
 					n, err := tun.Read(buf)
+					fmt.Println("tun read")
 					if err != nil {
 						errorChan <- err
 						<-tunReadChan
@@ -124,49 +122,41 @@ func main() {
 				}
 			}()
 
-			select {
-			case err := <-errorChan:
-				log.Printf("error happened, closing the tun and connection: %v\n", err)
-				tunReadExitChan <- struct{}{}
-				connectionReadExitChan <- struct{}{}
-				return
-			case ipPacketBytes := <-tunReadChan:
-				_, err := c.Write(comm.NewIPPacketPacket(string(ipPacketBytes)).Pack())
-				if err != nil {
+			for {
+				select {
+				case err := <-errorChan:
 					log.Printf("error happened, closing the tun and connection: %v\n", err)
 					tunReadExitChan <- struct{}{}
 					connectionReadExitChan <- struct{}{}
 					return
-				}
-			case msg := <-connectionReadChan:
-				switch v := msg.(type) {
-				case *comm.IPPacketPacket:
-					_, err := tun.Write([]byte(v.Data))
+				case ipPacketBytes := <-tunReadChan:
+					_, err := c.Write(ipPacketBytes)
+					fmt.Println("Fs")
 					if err != nil {
-						log.Printf("failed to write to tun: %v\n", err)
+						log.Printf("error happened, closing the tun and connection: %v\n", err)
 						tunReadExitChan <- struct{}{}
 						connectionReadExitChan <- struct{}{}
 						return
 					}
-				case *comm.HeartPacket:
-					_, err := c.Write(comm.NewHeartPacket().Pack())
-					if err != nil {
-						log.Printf("failed to write to connection, closing the tun and connection: %v\n", err)
-						tunReadExitChan <- struct{}{}
-						connectionReadExitChan <- struct{}{}
-						return
+				case msg := <-connectionReadChan:
+					if string(msg) == string(comm.MagicHeart) {
+						_, err := tun.Write(comm.MagicHeart)
+						if err != nil {
+							log.Printf("failed to write to tun: %v\n", err)
+							tunReadExitChan <- struct{}{}
+							connectionReadExitChan <- struct{}{}
+							return
+						}
+					} else {
+						_, err := tun.Write(msg)
+						if err != nil {
+							log.Printf("failed to write to tun: %v\n", err)
+							tunReadExitChan <- struct{}{}
+							connectionReadExitChan <- struct{}{}
+							return
+						}
 					}
-				default:
-					log.Printf("protocol error, closing tun and connection: unexpected packet received\n")
-					tunReadExitChan <- struct{}{}
-					connectionReadExitChan <- struct{}{}
-					return
 				}
-			case <-loginExitChan:
-				log.Printf("external exit, closing tun and connection")
-				tunReadExitChan <- struct{}{}
-				connectionReadExitChan <- struct{}{}
-				return
 			}
 		}()
 	}

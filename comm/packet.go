@@ -6,6 +6,8 @@ import (
 	"inet.af/netaddr"
 )
 
+var MagicHeart = []byte{0xaa, 0xbb, 0xcc}
+
 type PacketType int
 
 const (
