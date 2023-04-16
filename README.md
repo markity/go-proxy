@@ -3,9 +3,9 @@
 配置nat和ip转发:
 
 ```
-iptables -t nat -D POSTROUTING -s 10.8.0.0/16 ! -d 10.8.0.0/16 -m comment --comment 'vpndemo' -j MASQUERADE"
-iptables -D FORWARD -s 10.8.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT"
-iptables -D FORWARD -d 10.8.0.0/16 -j ACCEPT
+sudo iptables -t nat -D POSTROUTING -s 10.8.0.0/16 ! -d 10.8.0.0/16 -m comment --comment 'vpndemo' -j MASQUERADE"
+sudo iptables -D FORWARD -s 10.8.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+sudo iptables -D FORWARD -d 10.8.0.0/16 -j ACCEPT
 ```
 
 运行服务器:
@@ -13,7 +13,7 @@ iptables -D FORWARD -d 10.8.0.0/16 -j ACCEPT
 ```sh
 > git clone https://github.com/markity/go-proxy.git
 > cd ./go-proxy/server/
-> go run .
+> sudo go run .
 ```
 
 ### 客户端连接服务器
@@ -21,7 +21,7 @@ iptables -D FORWARD -d 10.8.0.0/16 -j ACCEPT
 ```
 > cd ./go-proxy/client
 > go build .
-> ./client -u markity -p 12345
+> sudo ./client -u markity -p 12345
 ```
 
 ### 配置用户名密码
