@@ -69,38 +69,94 @@ ip route add 128.0.0.0/1 dev %v`
 
 	fmt.Printf("transferring data...\n")
 
+	timeTickChan := time.Tick(time.Second)
+	errorChan := make(chan error)
+	tunReadChan := make(chan []byte)
+	tunReadExitChan := make(chan struct{})
+	connectionReadChan := make(chan interface{})
+	connectionReadExitChan := make(chan struct{})
+
 	// tun reader
 	go func() {
+		buf := make([]byte, 1300, 1300)
 		for {
-			buf := make([]byte, 1300, 1300)
 			n, err := tun.Read(buf)
 			if err != nil {
-				panic(err)
+				errorChan <- err
+				<-tunReadExitChan
+				return
 			}
-			println("write conn")
-			_, err = c.Write(buf[:n])
-			if err != nil {
-				panic(err)
+
+			copyBuf := make([]byte, n, n)
+			copy(copyBuf, buf[:n])
+			select {
+			case tunReadChan <- copyBuf:
+			case <-tunReadExitChan:
+				return
 			}
 		}
 	}()
 
 	// connection reader
 	go func() {
+		buf := make([]byte, 1400, 1400)
 		for {
-			buf := make([]byte, 1400, 1400)
+			c.SetReadDeadline(time.Now().Add(ReadTimeout))
 			n, err := c.Read(buf)
 			if err != nil {
-				panic(err)
+				errorChan <- err
+				<-connectionReadExitChan
+				return
 			}
-			println("write tun")
-			_, err = tun.Write(buf[:n])
-			if err != nil {
-				panic(err)
+
+			select {
+			case connectionReadChan <- comm.ParsePacket(buf[:n]):
+			case <-connectionReadExitChan:
+				return
 			}
 		}
-
 	}()
 
-	select {}
+	for {
+		select {
+		case <-timeTickChan:
+			_, err := c.Write(comm.NewHeartPacket().Pack())
+			if err != nil {
+				tunReadExitChan <- struct{}{}
+				connectionReadExitChan <- struct{}{}
+				log.Printf("failed to write to connection: %v\n", err)
+				return
+			}
+		case err := <-errorChan:
+			tunReadExitChan <- struct{}{}
+			connectionReadExitChan <- struct{}{}
+			log.Printf("error happened: %v", err)
+			return
+		case ipPacketContent := <-tunReadChan:
+			_, err := c.Write(comm.NewIPPacketPacket(string(ipPacketContent)).Pack())
+			if err != nil {
+				log.Printf("failed to write to connection: %v\n", err)
+				tunReadExitChan <- struct{}{}
+				connectionReadExitChan <- struct{}{}
+				return
+			}
+		case msg := <-connectionReadChan:
+			switch v := msg.(type) {
+			case *comm.IPPacketPacket:
+				_, err := tun.Write([]byte(v.Data))
+				if err != nil {
+					log.Printf("failed to write to tun: %v\n", err)
+					tunReadExitChan <- struct{}{}
+					connectionReadExitChan <- struct{}{}
+					return
+				}
+			case *comm.HeartPacket:
+			default:
+				log.Printf("protocol error: unexpected packet received\n")
+				tunReadExitChan <- struct{}{}
+				connectionReadExitChan <- struct{}{}
+				return
+			}
+		}
+	}
 }
