@@ -23,7 +23,7 @@ func main() {
 			return []byte(pwd), nil
 		},
 		CipherSuites:   []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
-		MTU:            1400,
+		MTU:            1500,
 		ConnectTimeout: &ConnectTimeout,
 	}
 
@@ -55,6 +55,7 @@ func main() {
 			forServer := ipv4Poll.Next()
 			forClient := ipv4Poll.Next()
 			defer func() {
+				fmt.Println("connection closed")
 				ipv4Poll.Release(forClient)
 				ipv4Poll.Release(forServer)
 				c.Close()
@@ -84,6 +85,7 @@ func main() {
 				buf := make([]byte, 1500, 1500)
 				for {
 					c.SetReadDeadline(time.Now().Add(ReadTimeout))
+					c.Write(comm.HeartMagicPacket)
 					n, err := c.Read(buf)
 					if err != nil {
 						errorChan <- err
