@@ -3,10 +3,9 @@
 配置nat和ip转发:
 
 ```
-> echo 1 > /proc/sys/net/ipv4/ip_forward
-> sysctl -p /etc/sysctl.conf
-> sudo iptables -t nat -D POSTROUTING -s 10.8.0.0/16 ! -d 10.8.0.0/16 -m comment --comment 'vpndemo' -j MASQUERADE"
-> sudo iptables -D FORWARD -s 10.8.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+> sysctl -w net.ipv4.ip_forward=1
+> sudo iptables -t nat -D POSTROUTING -s 10.8.0.0/16 ! -d 10.8.0.0/16 -m comment --comment 'vpndemo' -j MASQUERADE
+> sudo iptables -D FORWARD -s 10.8.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT
 > sudo iptables -D FORWARD -d 10.8.0.0/16 -j ACCEPT
 ```
 
