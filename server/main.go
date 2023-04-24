@@ -52,51 +52,52 @@ func main() {
 		fmt.Println("succeed to Accept")
 
 		go func() {
-			forServer := ipv4Poll.Next()
-			forClient := ipv4Poll.Next()
+			forServerV4 := ipv4Poll.Next()
+			forClientV4 := ipv4Poll.Next()
 			defer func() {
 				fmt.Println("connection closed")
-				ipv4Poll.Release(forClient)
-				ipv4Poll.Release(forServer)
-				c.Close()
+				ipv4Poll.Release(forServerV4)
+				ipv4Poll.Release(forClientV4)
 			}()
 
 			tun, err := water.New(water.Config{DeviceType: water.TUN})
 			if err != nil {
 				log.Fatalf("failed to create tun: %v\n", err)
 			}
-			defer tun.Close()
 
 			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
-			comm.MustIPCmd("addr", "add", forServer.String(), "dev", tun.Name())
-			comm.MustIPCmd("route", "add", forClient.String()+"/32", "via", forServer.String())
+			comm.MustIPCmd("addr", "add", forServerV4.String(), "dev", tun.Name())
+			comm.MustIPCmd("route", "add", forClientV4.String()+"/32", "via", forServerV4.String())
 
 			// 发送ip dispatch包, 然后开始转发数据包
-			c.Write([]byte(forClient.String()))
+			c.Write([]byte(forClientV4.String()))
 
-			errorChan := make(chan error)
-			tunReadChan := make(chan []byte)
-			tunReadExitChan := make(chan struct{})
-			connectionReadChan := make(chan []byte)
-			connectionReadExitChan := make(chan struct{})
+			errorChan := make(chan error, 2)
+
+			tunReaderChan := make(chan []byte)
+			tunReaderExitChan := make(chan struct{})
+
+			connectionReaderChan := make(chan []byte)
+			connectionReaderExitChan := make(chan struct{})
 
 			// connection reader
 			go func() {
 				buf := make([]byte, 1500, 1500)
 				for {
-					c.SetReadDeadline(time.Now().Add(ReadTimeout))
-					c.Write(comm.HeartMagicPacket)
+					c.SetDeadline(time.Now().Add(ReadTimeout))
 					n, err := c.Read(buf)
 					if err != nil {
+						tun.Close()
+						c.Close()
 						errorChan <- err
-						<-connectionReadExitChan
+						<-connectionReaderExitChan
 						return
 					}
 					copyBuf := make([]byte, n, n)
 					copy(copyBuf, buf)
 					select {
-					case connectionReadChan <- copyBuf:
-					case <-connectionReadExitChan:
+					case connectionReaderChan <- copyBuf:
+					case <-connectionReaderExitChan:
 						return
 					}
 				}
@@ -108,14 +109,17 @@ func main() {
 				for {
 					n, err := tun.Read(buf)
 					if err != nil {
-						<-tunReadChan
+						tun.Close()
+						c.Close()
+						errorChan <- err
+						<-tunReaderExitChan
 						return
 					}
 					copyBuf := make([]byte, n, n)
 					copy(copyBuf, buf[:n])
 					select {
-					case tunReadChan <- copyBuf:
-					case <-tunReadExitChan:
+					case tunReaderChan <- copyBuf:
+					case <-tunReaderExitChan:
 						return
 					}
 				}
@@ -124,33 +128,41 @@ func main() {
 			for {
 				select {
 				case err := <-errorChan:
+					tun.Close()
+					c.Close()
 					log.Printf("error happened, closing the tun and connection: %v\n", err)
-					tunReadExitChan <- struct{}{}
-					connectionReadExitChan <- struct{}{}
+					tunReaderExitChan <- struct{}{}
+					connectionReaderExitChan <- struct{}{}
 					return
-				case ipPacketBytes := <-tunReadChan:
+				case ipPacketBytes := <-tunReaderChan:
 					_, err := c.Write(ipPacketBytes)
 					if err != nil {
+						tun.Close()
+						c.Close()
 						log.Printf("error happened, closing the tun and connection: %v\n", err)
-						tunReadExitChan <- struct{}{}
-						connectionReadExitChan <- struct{}{}
+						tunReaderExitChan <- struct{}{}
+						connectionReaderExitChan <- struct{}{}
 						return
 					}
-				case msg := <-connectionReadChan:
+				case msg := <-connectionReaderChan:
 					if string(msg) == string(comm.HeartMagicPacket) {
 						_, err := c.Write(msg)
 						if err != nil {
+							tun.Close()
+							c.Close()
 							log.Printf("failed to write to tun: %v\n", err)
-							tunReadExitChan <- struct{}{}
-							connectionReadExitChan <- struct{}{}
+							tunReaderExitChan <- struct{}{}
+							connectionReaderExitChan <- struct{}{}
 							return
 						}
 					} else {
 						_, err := tun.Write(msg)
 						if err != nil {
+							tun.Close()
+							c.Close()
 							log.Printf("failed to write to tun: %v\n", err)
-							tunReadExitChan <- struct{}{}
-							connectionReadExitChan <- struct{}{}
+							tunReaderExitChan <- struct{}{}
+							connectionReaderExitChan <- struct{}{}
 							return
 						}
 					}

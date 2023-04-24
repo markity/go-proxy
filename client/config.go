@@ -3,7 +3,7 @@ package main
 import "time"
 
 // 服务端的ip
-var ServerIP = "162.14.208.15"
+var ServerIP = "43.154.101.24"
 var ServerPort = 8000
 
 // 连接超时

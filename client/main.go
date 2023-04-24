@@ -19,7 +19,7 @@ func main() {
 	p := flag.String("p", "", "password")
 	flag.Parse()
 	if *u == "" || *p == "" {
-		fmt.Printf("usage: %v -u <username> -p <password>\n", os.Args[0])
+		log.Printf("usage: %v -u <username> -p <password>\n", os.Args[0])
 		return
 	}
 
@@ -52,17 +52,19 @@ func main() {
 	c.SetReadDeadline(time.Now().Add(ReadTimeout))
 	n, err := c.Read(packetBytes)
 	if err != nil {
-		log.Fatalf("failed to read: %v\n", err)
+		log.Printf("failed to read: %v\n", err)
+		return
 	}
 
 	// 读到的第一个数据包应该是ip dispatch包
 	ipString := string(packetBytes[:n])
-	ipForClient, err := netaddr.ParseIP(ipString)
-	if err != nil || !ipForClient.Is4() {
-		log.Fatalf("protocol error: unexpected ip dispatch packet read")
+	ipForClientV4, err := netaddr.ParseIP(ipString)
+	if err != nil || !ipForClientV4.Is4() {
+		log.Printf("protocol error: unexpected ip dispatch packet read")
+		return
 	}
 
-	fmt.Printf("succeed to fetch ip: %v\n", ipForClient)
+	log.Printf("succeed to fetch ip: %v\n", ipForClientV4)
 
 	// 开tun
 	tun, err := water.New(water.Config{DeviceType: water.TUN})
@@ -75,22 +77,26 @@ func main() {
 	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
 	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
-	fmt.Println("creating route table...")
+	log.Println("creating route table...")
 	// 通过脚本执行
 	shFmt := `DEFAULT_GW=$(ip route|grep default|cut -d' ' -f3)
 ip route add %v via $DEFAULT_GW
 ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v`
+
 	comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
 
-	fmt.Printf("transferring data...\n")
+	log.Printf("transferring data...\n")
 
 	timeTickChan := time.NewTicker(HeartInterval).C
-	errorChan := make(chan error)
-	tunReadChan := make(chan []byte)
-	tunReadExitChan := make(chan struct{})
-	connectionReadChan := make(chan []byte)
-	connectionReadExitChan := make(chan struct{})
+
+	errorChan := make(chan error, 2)
+
+	tunReaderChan := make(chan []byte)
+	tunReaderExitChan := make(chan struct{})
+
+	connectionReaderChan := make(chan []byte)
+	connectionReaderExitChan := make(chan struct{})
 
 	// tun reader
 	go func() {
@@ -98,15 +104,16 @@ ip route add 128.0.0.0/1 dev %v`
 		for {
 			n, err := tun.Read(buf)
 			if err != nil {
-				<-tunReadExitChan
+				errorChan <- err
+				<-tunReaderExitChan
 				return
 			}
 
 			copyBuf := make([]byte, n, n)
 			copy(copyBuf, buf[:n])
 			select {
-			case tunReadChan <- copyBuf:
-			case <-tunReadExitChan:
+			case tunReaderChan <- copyBuf:
+			case <-tunReaderExitChan:
 				return
 			}
 		}
@@ -120,15 +127,15 @@ ip route add 128.0.0.0/1 dev %v`
 			n, err := c.Read(buf)
 			if err != nil {
 				errorChan <- err
-				<-connectionReadExitChan
+				<-connectionReaderExitChan
 				return
 			}
 
 			copyBuf := make([]byte, n, n)
 			copy(copyBuf, buf[:n])
 			select {
-			case connectionReadChan <- copyBuf:
-			case <-connectionReadExitChan:
+			case connectionReaderChan <- copyBuf:
+			case <-connectionReaderExitChan:
 				return
 			}
 		}
@@ -139,21 +146,36 @@ ip route add 128.0.0.0/1 dev %v`
 		case <-timeTickChan:
 			_, err := c.Write(comm.HeartMagicPacket)
 			if err != nil {
-				log.Fatalf("failed to write to connection: %v\n", err)
+				tun.Close()
+				c.Close()
+				tunReaderExitChan <- struct{}{}
+				connectionReaderExitChan <- struct{}{}
+				log.Printf("failed to write to connection: %v\n", err)
+				return
 			}
 		case err := <-errorChan:
-			log.Fatalf("error happened: %v\n", err)
-		case ipPacketContent := <-tunReadChan:
+			tunReaderExitChan <- struct{}{}
+			connectionReaderExitChan <- struct{}{}
+			log.Printf("error happened: %v\n", err)
+			return
+		case ipPacketContent := <-tunReaderChan:
 			_, err := c.Write(ipPacketContent)
 			if err != nil {
-				log.Fatalf("failed to write to connection: %v\n", err)
+				tunReaderExitChan <- struct{}{}
+				connectionReaderExitChan <- struct{}{}
+				log.Printf("failed to write to connection: %v\n", err)
+				return
 			}
-		case msg := <-connectionReadChan:
+		case msg := <-connectionReaderChan:
 			if string(msg) == string(comm.HeartMagicPacket) {
+				// empty
 			} else {
 				_, err := tun.Write(msg)
 				if err != nil {
-					log.Fatalf("failed to write to tun: %v\n", err)
+					tunReaderExitChan <- struct{}{}
+					connectionReaderExitChan <- struct{}{}
+					log.Printf("failed to write to tun: %v\n", err)
+					return
 				}
 			}
 		}

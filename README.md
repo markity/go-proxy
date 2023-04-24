@@ -1,6 +1,6 @@
 ### 搭建方法
 
-配置nat和ip转发:
+在服务器上配置如下nat和ip转发(注意系统重启后需要再次设置):
 
 ```
 sysctl -w net.ipv4.ip_forward=1
@@ -35,3 +35,13 @@ func init() {
 	UserMap["username2"] = "password2"
 }
 ```
+
+### 只能用国内的网站，用不了油管和google怎么办?
+
+这是因为国内的DNS服务器乱解析，你需要将`/etc/resolv.conf`的内容改成这样的:
+
+```
+nameserver 8.8.8.8
+```
+
+这样就能使用google的dns域名解析了。
