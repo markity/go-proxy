@@ -72,12 +72,11 @@ func main() {
 		log.Printf("failed to create tun device: %v\n", err)
 		return
 	}
-	defer tun.Close()
 
 	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
 	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
-	log.Println("creating route table...")
+	log.Println("creating route table and dns server...")
 	// 通过脚本执行
 	shFmt := `DEFAULT_GW=$(ip route|grep default|cut -d' ' -f3)
 ip route add %v via $DEFAULT_GW
@@ -85,6 +84,21 @@ ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v`
 
 	comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
+
+	f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
+	if err != nil {
+		tun.Close()
+		log.Printf("failed to edit dns server file: %v\n", err)
+		return
+	}
+
+	dnsServerFileData := ""
+	for _, v := range DNSServerIPS {
+		dnsServerFileData += "nameserver " + v + "\n"
+	}
+
+	f.WriteString(dnsServerFileData)
+	f.Close()
 
 	log.Printf("transferring data...\n")
 
@@ -168,7 +182,6 @@ ip route add 128.0.0.0/1 dev %v`
 			}
 		case msg := <-connectionReaderChan:
 			if string(msg) == string(comm.HeartMagicPacket) {
-				// empty
 			} else {
 				_, err := tun.Write(msg)
 				if err != nil {
