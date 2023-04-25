@@ -19,15 +19,19 @@ iptables -A FORWARD -d 10.8.0.0/16 -j ACCEPT
 
 ### 客户端连接服务器
 
+首先编辑好`client/config.go`里面的ip配置, 然后运行下面的命令:
+
 ```
 > cd ./go-proxy/client
 > go build .
 > sudo ./client -u markity -p 12345
 ```
 
+> 上述-u参数表示username, -p表示password, markity和12345是默认的一个账号密码, 如有需要可以自行修改, 见后文
+
 ### 配置用户名密码
 
-打开本项目的server/user_table.go, 自己照葫芦画瓢加几个用户就行了:
+打开本项目的`server/user_table.go`, 自己照葫芦画瓢加几个用户就行了:
 
 ```go
 func init() {
