@@ -36,12 +36,6 @@ func init() {
 }
 ```
 
-### 只能用国内的网站，用不了油管和google怎么办?
+### 关于dns污染
 
-这是因为国内的DNS服务器乱解析，你需要将`/etc/resolv.conf`的内容改成这样的:
-
-```
-nameserver 8.8.8.8
-```
-
-这样就能使用google的dns域名解析了。
+客户端会编辑`/etc/resolv.conf`, 覆写掉原来的dns服务器而使用`client/config.go`配置的dns服务器。改成`1.1.1.1`和`8.8.8.8`。这样做的原因是经过我的测试, 默认配置的dns服务器无法正确解析google, youtube等国外被墙网站的域名, 国内的dns污染太严重, 乱解析一些国外域名。
