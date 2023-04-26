@@ -168,6 +168,8 @@ ip route add 128.0.0.0/1 dev %v`
 				return
 			}
 		case err := <-errorChan:
+			tun.Close()
+			c.Close()
 			tunReaderExitChan <- struct{}{}
 			connectionReaderExitChan <- struct{}{}
 			log.Printf("error happened: %v\n", err)
@@ -175,6 +177,8 @@ ip route add 128.0.0.0/1 dev %v`
 		case ipPacketContent := <-tunReaderChan:
 			_, err := c.Write(ipPacketContent)
 			if err != nil {
+				tun.Close()
+				c.Close()
 				tunReaderExitChan <- struct{}{}
 				connectionReaderExitChan <- struct{}{}
 				log.Printf("failed to write to connection: %v\n", err)
@@ -182,9 +186,12 @@ ip route add 128.0.0.0/1 dev %v`
 			}
 		case msg := <-connectionReaderChan:
 			if string(msg) == string(comm.HeartMagicPacket) {
+				log.Printf("heartbeat received...\n")
 			} else {
 				_, err := tun.Write(msg)
 				if err != nil {
+					tun.Close()
+					c.Close()
 					tunReaderExitChan <- struct{}{}
 					connectionReaderExitChan <- struct{}{}
 					log.Printf("failed to write to tun: %v\n", err)
