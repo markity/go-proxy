@@ -216,6 +216,11 @@ ip route add 128.0.0.0/1 dev %v`
 			log.Printf("closing client\n")
 			tunReaderExitChan <- struct{}{}
 			connectionReaderExitChan <- struct{}{}
+
+			shFmt = `DEFAULT_GW=$(ip route|grep default|cut -d' ' -f3)
+ip route del %v via $DEFAULT_GW`
+			comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
+
 			f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
 			if err != nil {
 				log.Printf("failed to restore dns server file: %v\n", err)
