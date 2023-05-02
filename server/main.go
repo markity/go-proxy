@@ -67,7 +67,7 @@ func main() {
 
 			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
 			comm.MustIPCmd("addr", "add", forServerV4.String(), "dev", tun.Name())
-			comm.MustIPCmd("route", "add", forClientV4.String()+"/32", "via", forServerV4.String())
+			comm.MustIPCmd("route", "add", forClientV4.String()+"/32", "dev", tun.Name())
 
 			// 发送ip dispatch包, 然后开始转发数据包
 			c.Write([]byte(forClientV4.String()))
@@ -82,7 +82,7 @@ func main() {
 
 			// connection reader
 			go func() {
-				buf := make([]byte, 1500, 1500)
+				buf := make([]byte, 2000, 2000)
 				for {
 					c.SetDeadline(time.Now().Add(ReadTimeout))
 					n, err := c.Read(buf)

@@ -3,10 +3,10 @@
 在服务器上配置如下nat和ip转发(注意系统重启后需要再次设置):
 
 ```
-> sysctl -w net.ipv4.ip_forward=1
-> iptables -t nat -A POSTROUTING -s 10.8.0.0/16 ! -d 10.8.0.0/16 -m comment --comment 'vpndemo' -j MASQUERADE
-> iptables -A FORWARD -s 10.8.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT
-> iptables -A FORWARD -d 10.8.0.0/16 -j ACCEPT
+> sudo sysctl -w net.ipv4.ip_forward=1
+> sudo iptables -t nat -A POSTROUTING -s 10.8.0.0/16 ! -d 10.8.0.0/16 -j MASQUERADE
+> sudo iptables -A FORWARD -s 10.8.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT
+> sudo iptables -A FORWARD -d 10.8.0.0/16 -j ACCEPT
 ```
 
 运行服务器:
