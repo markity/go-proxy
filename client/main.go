@@ -4,9 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"go-proxy/comm"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/pion/dtls"
@@ -85,6 +87,13 @@ ip route add 128.0.0.0/1 dev %v`
 
 	comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
 
+	originRevolvFileContect, err := ioutil.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		tun.Close()
+		log.Printf("failed to read dns server file: %v\n", err)
+		return
+	}
+
 	f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
 	if err != nil {
 		tun.Close()
@@ -111,6 +120,9 @@ ip route add 128.0.0.0/1 dev %v`
 
 	connectionReaderChan := make(chan []byte)
 	connectionReaderExitChan := make(chan struct{})
+
+	sigintChan := make(chan os.Signal)
+	signal.Notify(sigintChan, os.Interrupt)
 
 	// tun reader
 	go func() {
@@ -198,6 +210,23 @@ ip route add 128.0.0.0/1 dev %v`
 					return
 				}
 			}
+		case <-sigintChan:
+			tun.Close()
+			c.Close()
+			log.Printf("closing client\n")
+			tunReaderExitChan <- struct{}{}
+			connectionReaderExitChan <- struct{}{}
+			f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
+			if err != nil {
+				log.Printf("failed to restore dns server file: %v\n", err)
+				return
+			}
+			_, err = f.Write(originRevolvFileContect)
+			if err != nil {
+				log.Printf("failed to restore dns server file: %v\n", err)
+				return
+			}
+			return
 		}
 	}
 }

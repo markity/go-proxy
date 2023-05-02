@@ -43,3 +43,5 @@ func init() {
 ### 关于dns污染
 
 客户端会编辑`/etc/resolv.conf`, 覆写掉原来的dns服务器而使用`client/config.go`配置的dns服务器。改成`1.1.1.1`和`8.8.8.8`。这样做的原因是经过我的测试, 默认配置的dns服务器无法正确解析google, youtube等国外被墙网站的域名, 国内的dns污染太严重, 乱解析一些国外域名。
+
+退出客户端时, 将恢复原来的resolv.conf文件。
