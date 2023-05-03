@@ -60,6 +60,8 @@ func main() {
 		return
 	}
 
+	c.SetReadDeadline(time.Time{})
+
 	// 读到的第一个数据包应该是ip dispatch包
 	ipString := string(packetBytes[:n])
 	ipForClientV4, err := netaddr.ParseIP(ipString)
@@ -77,7 +79,7 @@ func main() {
 		return
 	}
 
-	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1200")
+	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
 	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
 	log.Println("creating route table and dns server...")
