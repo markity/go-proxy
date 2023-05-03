@@ -24,7 +24,7 @@ func main() {
 		},
 		CipherSuites:   []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
 		MTU:            1500,
-		ConnectTimeout: &ConnectTimeout,
+		ConnectTimeout: &comm.ConnectTimeout,
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:8000")
@@ -65,12 +65,16 @@ func main() {
 				log.Fatalf("failed to create tun: %v\n", err)
 			}
 
-			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
+			comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1200")
 			comm.MustIPCmd("addr", "add", forServerV4.String(), "dev", tun.Name())
 			comm.MustIPCmd("route", "add", forClientV4.String()+"/32", "dev", tun.Name())
 
 			// 发送ip dispatch包, 然后开始转发数据包
 			c.Write([]byte(forClientV4.String()))
+
+			heartbeatLostCount := 0
+
+			tickChan := time.NewTicker(time.Second).C
 
 			errorChan := make(chan error, 2)
 
@@ -82,9 +86,8 @@ func main() {
 
 			// connection reader
 			go func() {
-				buf := make([]byte, 2000, 2000)
+				buf := make([]byte, 1500, 1500)
 				for {
-					c.SetDeadline(time.Now().Add(ReadTimeout))
 					n, err := c.Read(buf)
 					if err != nil {
 						tun.Close()
@@ -155,6 +158,7 @@ func main() {
 							connectionReaderExitChan <- struct{}{}
 							return
 						}
+						heartbeatLostCount = 0
 					} else {
 						_, err := tun.Write(msg)
 						if err != nil {
@@ -165,6 +169,16 @@ func main() {
 							connectionReaderExitChan <- struct{}{}
 							return
 						}
+					}
+				case <-tickChan:
+					heartbeatLostCount++
+					if heartbeatLostCount > comm.MaxLostHeartbeatN {
+						tun.Close()
+						c.Close()
+						log.Printf("max hearbeat lose reached, losing connection\n")
+						tunReaderExitChan <- struct{}{}
+						connectionReaderExitChan <- struct{}{}
+						return
 					}
 				}
 			}

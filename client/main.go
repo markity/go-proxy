@@ -32,7 +32,7 @@ func main() {
 		PSKIdentityHint: []byte(*u),
 		CipherSuites:    []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
 		MTU:             1500,
-		ConnectTimeout:  &ConnetTimeout,
+		ConnectTimeout:  &comm.ConnectTimeout,
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", ServerIP+":"+fmt.Sprint(ServerPort))
@@ -42,16 +42,18 @@ func main() {
 	}
 
 	log.Println("dialing to:", addr)
+	n1 := time.Now()
 	c, err := dtls.Dial("udp", addr, config)
 	if err != nil {
 		log.Printf("failed to dial to server: %v\n", err)
 		return
 	}
+	n2 := time.Now()
 	defer c.Close()
 
 	// 读取ip dispatch包
 	packetBytes := make([]byte, 1500, 1500)
-	c.SetReadDeadline(time.Now().Add(ReadTimeout))
+	c.SetReadDeadline(time.Now().Add(comm.ConnectTimeout - n2.Sub(n1)))
 	n, err := c.Read(packetBytes)
 	if err != nil {
 		log.Printf("failed to read: %v\n", err)
@@ -75,10 +77,14 @@ func main() {
 		return
 	}
 
-	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
+	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1200")
 	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
 	log.Println("creating route table and dns server...")
+
+	sigintChan := make(chan os.Signal)
+	signal.Notify(sigintChan, os.Interrupt)
+
 	// 通过脚本执行
 	shFmt := `DEFAULT_GW=$(ip route|grep default|cut -d' ' -f3)
 ip route add %v via $DEFAULT_GW
@@ -86,6 +92,10 @@ ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v`
 
 	comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
+	defer func() {
+		shFmt = `ip route del %v via $(ip route|grep default|cut -d' ' -f3)`
+		comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
+	}()
 
 	originRevolvFileContect, err := ioutil.ReadFile("/etc/resolv.conf")
 	if err != nil {
@@ -109,9 +119,25 @@ ip route add 128.0.0.0/1 dev %v`
 	f.WriteString(dnsServerFileData)
 	f.Close()
 
+	defer func() {
+		f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
+		if err != nil {
+			log.Printf("failed to restore dns server file: %v\n", err)
+			return
+		}
+		defer f.Close()
+		_, err = f.Write(originRevolvFileContect)
+		if err != nil {
+			log.Printf("failed to restore dns server file: %v\n", err)
+			return
+		}
+	}()
+
 	log.Printf("transferring data...\n")
 
-	timeTickChan := time.NewTicker(HeartInterval).C
+	heartbeatLostCount := 0
+
+	tickerChan := time.NewTicker(comm.HeartbeatInterval).C
 
 	errorChan := make(chan error, 2)
 
@@ -120,9 +146,6 @@ ip route add 128.0.0.0/1 dev %v`
 
 	connectionReaderChan := make(chan []byte)
 	connectionReaderExitChan := make(chan struct{})
-
-	sigintChan := make(chan os.Signal)
-	signal.Notify(sigintChan, os.Interrupt)
 
 	// tun reader
 	go func() {
@@ -149,9 +172,9 @@ ip route add 128.0.0.0/1 dev %v`
 	go func() {
 		buf := make([]byte, 1500, 1500)
 		for {
-			c.SetReadDeadline(time.Now().Add(ReadTimeout))
 			n, err := c.Read(buf)
 			if err != nil {
+				fmt.Println("happened conn reader", err)
 				errorChan <- err
 				<-connectionReaderExitChan
 				return
@@ -169,7 +192,7 @@ ip route add 128.0.0.0/1 dev %v`
 
 	for {
 		select {
-		case <-timeTickChan:
+		case <-tickerChan:
 			_, err := c.Write(comm.HeartMagicPacket)
 			if err != nil {
 				tun.Close()
@@ -177,6 +200,15 @@ ip route add 128.0.0.0/1 dev %v`
 				tunReaderExitChan <- struct{}{}
 				connectionReaderExitChan <- struct{}{}
 				log.Printf("failed to write to connection: %v\n", err)
+				return
+			}
+			heartbeatLostCount++
+			if heartbeatLostCount > comm.MaxLostHeartbeatN {
+				tun.Close()
+				c.Close()
+				tunReaderExitChan <- struct{}{}
+				connectionReaderExitChan <- struct{}{}
+				log.Printf("max hearbeat lose reached, losing connection\n")
 				return
 			}
 		case err := <-errorChan:
@@ -198,6 +230,7 @@ ip route add 128.0.0.0/1 dev %v`
 			}
 		case msg := <-connectionReaderChan:
 			if string(msg) == string(comm.HeartMagicPacket) {
+				heartbeatLostCount = 0
 				log.Printf("heartbeat received...\n")
 			} else {
 				_, err := tun.Write(msg)
@@ -216,21 +249,6 @@ ip route add 128.0.0.0/1 dev %v`
 			log.Printf("closing client\n")
 			tunReaderExitChan <- struct{}{}
 			connectionReaderExitChan <- struct{}{}
-
-			shFmt = `DEFAULT_GW=$(ip route|grep default|cut -d' ' -f3)
-ip route del %v via $DEFAULT_GW`
-			comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
-
-			f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
-			if err != nil {
-				log.Printf("failed to restore dns server file: %v\n", err)
-				return
-			}
-			_, err = f.Write(originRevolvFileContect)
-			if err != nil {
-				log.Printf("failed to restore dns server file: %v\n", err)
-				return
-			}
 			return
 		}
 	}
