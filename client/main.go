@@ -79,7 +79,7 @@ func main() {
 		return
 	}
 
-	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1500")
+	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1200")
 	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
 	log.Println("creating route table and dns server...")
