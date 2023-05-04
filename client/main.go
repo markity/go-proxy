@@ -30,7 +30,7 @@ func main() {
 			return []byte(*p), nil
 		},
 		PSKIdentityHint: []byte(*u),
-		CipherSuites:    []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
+		CipherSuites:    []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_GCM_SHA256},
 		MTU:             1500,
 		ConnectTimeout:  &comm.ConnectTimeout,
 	}
@@ -176,7 +176,6 @@ ip route add 128.0.0.0/1 dev %v`
 		for {
 			n, err := c.Read(buf)
 			if err != nil {
-				fmt.Println("happened conn reader", err)
 				errorChan <- err
 				<-connectionReaderExitChan
 				return
