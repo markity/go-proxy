@@ -22,7 +22,7 @@ func main() {
 			}
 			return []byte(pwd), nil
 		},
-		CipherSuites:   []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_CCM_8},
+		CipherSuites:   []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_GCM_SHA256},
 		MTU:            1500,
 		ConnectTimeout: &comm.ConnectTimeout,
 	}
