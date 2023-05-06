@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"go-proxy/comm"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -48,11 +47,11 @@ func main() {
 		log.Printf("failed to dial to server: %v\n", err)
 		return
 	}
-	n2 := time.Now()
 	defer c.Close()
+	n2 := time.Now()
 
 	// 读取ip dispatch包
-	packetBytes := make([]byte, 1500, 1500)
+	packetBytes := make([]byte, 1500)
 	c.SetReadDeadline(time.Now().Add(comm.ConnectTimeout - n2.Sub(n1)))
 	n, err := c.Read(packetBytes)
 	if err != nil {
@@ -84,7 +83,7 @@ func main() {
 
 	log.Println("creating route table and dns server...")
 
-	sigintChan := make(chan os.Signal)
+	sigintChan := make(chan os.Signal, 1)
 	signal.Notify(sigintChan, os.Interrupt)
 
 	// 通过脚本执行
@@ -99,7 +98,7 @@ ip route add 128.0.0.0/1 dev %v`
 		comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
 	}()
 
-	originRevolvFileContect, err := ioutil.ReadFile("/etc/resolv.conf")
+	originRevolvFileContect, err := os.ReadFile("/etc/resolv.conf")
 	if err != nil {
 		tun.Close()
 		log.Printf("failed to read dns server file: %v\n", err)
@@ -151,7 +150,7 @@ ip route add 128.0.0.0/1 dev %v`
 
 	// tun reader
 	go func() {
-		buf := make([]byte, 1500, 1500)
+		buf := make([]byte, 1500)
 		for {
 			n, err := tun.Read(buf)
 			if err != nil {
@@ -160,7 +159,7 @@ ip route add 128.0.0.0/1 dev %v`
 				return
 			}
 
-			copyBuf := make([]byte, n, n)
+			copyBuf := make([]byte, n)
 			copy(copyBuf, buf[:n])
 			select {
 			case tunReaderChan <- copyBuf:
@@ -172,7 +171,7 @@ ip route add 128.0.0.0/1 dev %v`
 
 	// connection reader
 	go func() {
-		buf := make([]byte, 1500, 1500)
+		buf := make([]byte, 1500)
 		for {
 			n, err := c.Read(buf)
 			if err != nil {
@@ -181,7 +180,7 @@ ip route add 128.0.0.0/1 dev %v`
 				return
 			}
 
-			copyBuf := make([]byte, n, n)
+			copyBuf := make([]byte, n)
 			copy(copyBuf, buf[:n])
 			select {
 			case connectionReaderChan <- copyBuf:
