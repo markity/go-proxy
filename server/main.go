@@ -15,8 +15,7 @@ import (
 func main() {
 	config := &dtls.Config{
 		PSK: func(hint []byte) ([]byte, error) {
-			hintStr := string(hint)
-			pwd, ok := UserMap[hintStr]
+			pwd, ok := UserMap[string(hint)]
 			if !ok {
 				return nil, errors.New("unregistered username")
 			}
@@ -86,7 +85,7 @@ func main() {
 
 			// connection reader
 			go func() {
-				buf := make([]byte, 1500, 1500)
+				buf := make([]byte, 1500)
 				for {
 					n, err := c.Read(buf)
 					if err != nil {
@@ -96,7 +95,7 @@ func main() {
 						<-connectionReaderExitChan
 						return
 					}
-					copyBuf := make([]byte, n, n)
+					copyBuf := make([]byte, n)
 					copy(copyBuf, buf)
 					select {
 					case connectionReaderChan <- copyBuf:
@@ -108,7 +107,7 @@ func main() {
 
 			// tun reader
 			go func() {
-				buf := make([]byte, 1500, 1500)
+				buf := make([]byte, 1500)
 				for {
 					n, err := tun.Read(buf)
 					if err != nil {
@@ -118,7 +117,7 @@ func main() {
 						<-tunReaderExitChan
 						return
 					}
-					copyBuf := make([]byte, n, n)
+					copyBuf := make([]byte, n)
 					copy(copyBuf, buf[:n])
 					select {
 					case tunReaderChan <- copyBuf:
