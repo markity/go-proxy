@@ -98,14 +98,7 @@ ip route add 128.0.0.0/1 dev %v`
 		comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
 	}()
 
-	originRevolvFileContect, err := os.ReadFile("/etc/resolv.conf")
-	if err != nil {
-		tun.Close()
-		log.Printf("failed to read dns server file: %v\n", err)
-		return
-	}
-
-	f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
+	f, err := os.OpenFile("/etc/resolv.conf.head", os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0)
 	if err != nil {
 		tun.Close()
 		log.Printf("failed to edit dns server file: %v\n", err)
@@ -117,20 +110,18 @@ ip route add 128.0.0.0/1 dev %v`
 		dnsServerFileData += "nameserver " + v + "\n"
 	}
 
-	f.WriteString(dnsServerFileData)
+	_, err = f.WriteString(dnsServerFileData)
+	if err != nil {
+		tun.Close()
+		log.Printf("failed to edit dns server file: %v\n", err)
+		return
+	}
 	f.Close()
 
 	defer func() {
-		f, err := os.OpenFile("/etc/resolv.conf", os.O_RDWR|os.O_TRUNC, 0)
+		err := os.Remove("/etc/resolv.conf.head")
 		if err != nil {
-			log.Printf("failed to restore dns server file: %v\n", err)
-			return
-		}
-		defer f.Close()
-		_, err = f.Write(originRevolvFileContect)
-		if err != nil {
-			log.Printf("failed to restore dns server file: %v\n", err)
-			return
+			fmt.Println("failed to remove /etc/resolv.conf.head file")
 		}
 	}()
 
