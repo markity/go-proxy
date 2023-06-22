@@ -87,8 +87,8 @@ func main() {
 	signal.Notify(sigintChan, os.Interrupt)
 
 	// 通过脚本执行
-	shFmt := `DEFAULT_GW=$(ip route|grep default|cut -d' ' -f3)
-ip route add %v via $DEFAULT_GW
+	shFmt := `
+ip route add %v via $(ip route|grep default|cut -d' ' -f3)
 ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v`
 
@@ -104,6 +104,13 @@ ip route add 128.0.0.0/1 dev %v`
 		log.Printf("failed to edit dns server file: %v\n", err)
 		return
 	}
+	defer func() {
+		f.Close()
+		err := os.Remove("/etc/resolv.conf.head")
+		if err != nil {
+			fmt.Println("failed to remove /etc/resolv.conf.head file")
+		}
+	}()
 
 	dnsServerFileData := ""
 	for _, v := range DNSServerIPS {
@@ -116,14 +123,6 @@ ip route add 128.0.0.0/1 dev %v`
 		log.Printf("failed to edit dns server file: %v\n", err)
 		return
 	}
-	f.Close()
-
-	defer func() {
-		err := os.Remove("/etc/resolv.conf.head")
-		if err != nil {
-			fmt.Println("failed to remove /etc/resolv.conf.head file")
-		}
-	}()
 
 	log.Printf("transferring data...\n")
 
