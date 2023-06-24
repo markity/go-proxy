@@ -88,11 +88,11 @@ func main() {
 
 	// 通过脚本执行
 	shFmt := `
-ip route add %v via $(ip route|grep default|cut -d' ' -f3)
 ip route add 0.0.0.0/1 dev %v
-ip route add 128.0.0.0/1 dev %v`
+ip route add 128.0.0.0/1 dev %v
+ip route add %v via $(ip route|grep default|cut -d' ' -f3)`
 
-	comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, tun.Name(), tun.Name()))
+	comm.MustShCmd("-c", fmt.Sprintf(shFmt, tun.Name(), tun.Name(), ServerIP))
 	defer func() {
 		shFmt = `ip route del %v via $(ip route|grep default|cut -d' ' -f3)`
 		comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
