@@ -1,9 +1,12 @@
 ### 当前状态与预计功能
 
-- 支持dtls [已实现]
-- 支持tls websocket协议 [待实现]
-- 支持kcp [待实现]
-- 支持断线重连 [待实现]
+- 支持linux[OK]
+- 支持dtls [OK]
+- 支持断线重连 [OK]
+
+- 支持tls websocket协议 [TODO]
+- 支持kcp协议 [TODO]
+- 支持windows [TODO]
 
 ### 搭建方法
 

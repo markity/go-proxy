@@ -15,16 +15,25 @@ import (
 	"inet.af/netaddr"
 )
 
-func main() {
-	u := flag.String("u", "", "username")
-	p := flag.String("p", "", "password")
+var u *string
+var p *string
+var sigintChan chan os.Signal
+var config *dtls.Config
+var addr *net.UDPAddr
+
+func init() {
+	u = flag.String("u", "", "username")
+	p = flag.String("p", "", "password")
 	flag.Parse()
 	if *u == "" || *p == "" {
 		log.Printf("usage: %v -u <username> -p <password>\n", os.Args[0])
-		return
+		os.Exit(0)
 	}
 
-	config := &dtls.Config{
+	sigintChan = make(chan os.Signal, 1)
+	signal.Notify(sigintChan, os.Interrupt)
+
+	config = &dtls.Config{
 		PSK: func(hint []byte) ([]byte, error) {
 			return []byte(*p), nil
 		},
@@ -34,11 +43,21 @@ func main() {
 		ConnectTimeout:  &comm.ConnectTimeout,
 	}
 
-	addr, err := net.ResolveUDPAddr("udp", ServerIP+":"+fmt.Sprint(ServerPort))
+	var err error
+	addr, err = net.ResolveUDPAddr("udp", ServerIP+":"+fmt.Sprint(ServerPort))
 	if err != nil {
 		log.Printf("failed to ResolveUDPAddr: %v\n", err)
-		return
+		os.Exit(0)
 	}
+}
+
+func run() {
+	doExit := false
+	defer func() {
+		if doExit {
+			os.Exit(0)
+		}
+	}()
 
 	log.Println("dialing to:", addr)
 	n1 := time.Now()
@@ -83,15 +102,11 @@ func main() {
 
 	log.Println("creating route table and dns server...")
 
-	sigintChan := make(chan os.Signal, 1)
-	signal.Notify(sigintChan, os.Interrupt)
-
 	// 通过脚本执行
 	shFmt := `
 ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v
 ip route add %v via $(ip route|grep default|cut -d' ' -f3)`
-
 	comm.MustShCmd("-c", fmt.Sprintf(shFmt, tun.Name(), tun.Name(), ServerIP))
 	defer func() {
 		shFmt = `ip route del %v via $(ip route|grep default|cut -d' ' -f3)`
@@ -239,7 +254,20 @@ ip route add %v via $(ip route|grep default|cut -d' ' -f3)`
 			log.Printf("closing client\n")
 			tunReaderExitChan <- struct{}{}
 			connectionReaderExitChan <- struct{}{}
+			doExit = true
 			return
+		}
+	}
+}
+
+func main() {
+	for {
+		select {
+		case <-sigintChan:
+			return
+		default:
+			println("reconnecting")
+			run()
 		}
 	}
 }
