@@ -22,6 +22,11 @@ var config *dtls.Config
 var addr *net.UDPAddr
 
 func init() {
+	if os.Getuid() != 0 {
+		println("Root is required to use this command")
+		os.Exit(0)
+	}
+
 	u = flag.String("u", "", "username")
 	p = flag.String("p", "", "password")
 	flag.Parse()
