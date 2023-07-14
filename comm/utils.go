@@ -60,3 +60,16 @@ func MustShCmd(args ...string) {
 		log.Printf("failed to Run ShCmd: %v\n", err)
 	}
 }
+
+func MustShCmdGetOutput(args ...string) string {
+	log.Println(shcmd, strings.Join(args, " "))
+	cmd := exec.Command(shcmd, args...)
+	cmd.Stderr = os.Stderr
+	b := strings.Builder{}
+	cmd.Stdout = &b
+	if err := cmd.Run(); err != nil {
+		log.Printf("failed to Run ShCmd: %v\n", err)
+	}
+
+	return b.String()
+}

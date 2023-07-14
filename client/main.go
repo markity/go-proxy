@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/pion/dtls"
@@ -101,26 +102,37 @@ func run() {
 		log.Printf("failed to create tun device: %v\n", err)
 		return
 	}
+	defer tun.Close()
 
 	comm.MustIPCmd("link", "set", tun.Name(), "up", "mtu", "1200")
 	comm.MustIPCmd("addr", "add", ipString, "dev", tun.Name())
 
 	log.Println("creating route table and dns server...")
 
+	var defaultGateway = comm.MustShCmdGetOutput("-c", "ip route|grep default|cut -d' ' -f3")
+	if strings.ContainsRune(defaultGateway, '\n') {
+		defaultGateway = defaultGateway[0:strings.IndexRune(defaultGateway, '\n')]
+	}
+
 	// 通过脚本执行
 	shFmt := `
 ip route add 0.0.0.0/1 dev %v
 ip route add 128.0.0.0/1 dev %v
-ip route add %v via $(ip route|grep default|cut -d' ' -f3)`
-	comm.MustShCmd("-c", fmt.Sprintf(shFmt, tun.Name(), tun.Name(), ServerIP))
+ip route add %v via %v`
+	comm.MustShCmd("-c", fmt.Sprintf(shFmt, tun.Name(), tun.Name(), ServerIP, defaultGateway))
 	defer func() {
-		shFmt = `ip route del %v via $(ip route|grep default|cut -d' ' -f3)`
-		comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP))
+		shFmt = `ip route del %v via %v`
+		comm.MustShCmd("-c", fmt.Sprintf(shFmt, ServerIP, defaultGateway))
 	}()
+
+	originFileData, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		log.Printf("failed to read dns server file: %v\n", err)
+		return
+	}
 
 	f, err := os.OpenFile("/etc/resolv.conf.head", os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0)
 	if err != nil {
-		tun.Close()
 		log.Printf("failed to edit dns server file: %v\n", err)
 		return
 	}
@@ -130,6 +142,12 @@ ip route add %v via $(ip route|grep default|cut -d' ' -f3)`
 		if err != nil {
 			fmt.Println("failed to remove /etc/resolv.conf.head file")
 		}
+		resolvConfFile, err := os.OpenFile("/etc/resolv.conf", os.O_TRUNC|os.O_WRONLY, 0)
+		if err != nil {
+			fmt.Println("failed to recover /etc/resolv.conf file")
+		}
+		resolvConfFile.WriteString(string(originFileData))
+		resolvConfFile.Close()
 	}()
 
 	dnsServerFileData := ""
@@ -139,7 +157,6 @@ ip route add %v via $(ip route|grep default|cut -d' ' -f3)`
 
 	_, err = f.WriteString(dnsServerFileData)
 	if err != nil {
-		tun.Close()
 		log.Printf("failed to edit dns server file: %v\n", err)
 		return
 	}
